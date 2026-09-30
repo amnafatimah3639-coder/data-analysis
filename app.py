@@ -4,7 +4,7 @@ import re
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -15,15 +15,16 @@ st.set_page_config(
 
 
 # ============================================================
-# HUGGING FACE MODEL
+# HUGGING FACE SETTINGS
 # ============================================================
 
 HF_USERNAME = "AmnaFatimah"
 MODEL_NAME = "t5-small-polite-response"
 
+# Current Hugging Face router endpoint
 API_URL = (
-    f"https://api-inference.huggingface.co/models/"
-    f"{HF_USERNAME}/{MODEL_NAME}"
+    f"https://router.huggingface.co/hf-inference/"
+    f"models/{HF_USERNAME}/{MODEL_NAME}"
 )
 
 
@@ -33,7 +34,7 @@ API_URL = (
 
 def clean_text(text):
 
-    # Convert to lowercase
+    # Lowercase
     text = text.lower()
 
     # Remove URLs
@@ -75,10 +76,10 @@ def clean_text(text):
 
 
 # ============================================================
-# GET HUGGING FACE TOKEN
+# HUGGING FACE TOKEN
 # ============================================================
 
-def get_huggingface_token():
+def get_token():
 
     try:
         return st.secrets["HF_TOKEN"]
@@ -100,13 +101,13 @@ def generate_response(text):
         + cleaned_text
     )
 
-    token = get_huggingface_token()
+    token = get_token()
 
     headers = {
         "Content-Type": "application/json"
     }
 
-    # Add authentication only if a token exists
+    # Add Hugging Face authentication if available
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -127,49 +128,59 @@ def generate_response(text):
             timeout=120
         )
 
-        # Check HTTP status
-        if response.status_code != 200:
+        # ----------------------------------------------------
+        # SUCCESS
+        # ----------------------------------------------------
 
-            try:
-                error_data = response.json()
-            except Exception:
-                error_data = response.text
+        if response.status_code == 200:
 
-            return cleaned_text, None, str(error_data)
+            result = response.json()
 
-        result = response.json()
+            if isinstance(result, list):
 
-        # Hugging Face text-generation response
-        if isinstance(result, list):
+                if len(result) > 0:
 
-            if len(result) > 0:
+                    generated_text = result[0].get(
+                        "generated_text",
+                        ""
+                    )
 
-                generated = result[0].get(
-                    "generated_text",
-                    ""
-                )
+                    # Remove prompt if the API returns it
+                    if generated_text.startswith(prompt):
 
-                # Remove the original prompt if returned
-                if generated.startswith(prompt):
-                    generated = generated[len(prompt):].strip()
+                        generated_text = (
+                            generated_text[
+                                len(prompt):
+                            ].strip()
+                        )
 
-                return cleaned_text, generated, None
+                    return (
+                        cleaned_text,
+                        generated_text,
+                        None
+                    )
 
-        # Error returned by Hugging Face
-        if isinstance(result, dict):
+            return (
+                cleaned_text,
+                None,
+                "Unexpected response from Hugging Face."
+            )
 
-            if "error" in result:
+        # ----------------------------------------------------
+        # ERROR
+        # ----------------------------------------------------
 
-                return (
-                    cleaned_text,
-                    None,
-                    result["error"]
-                )
+        try:
+            error_data = response.json()
+
+        except Exception:
+            error_data = response.text
 
         return (
             cleaned_text,
             None,
-            "Unexpected response from Hugging Face."
+            f"Hugging Face API error "
+            f"({response.status_code}): {error_data}"
         )
 
     except requests.exceptions.Timeout:
@@ -177,10 +188,19 @@ def generate_response(text):
         return (
             cleaned_text,
             None,
-            "The Hugging Face request timed out. Please try again."
+            "The Hugging Face request timed out."
         )
 
-    except requests.exceptions.RequestException as error:
+    except requests.exceptions.ConnectionError:
+
+        return (
+            cleaned_text,
+            None,
+            "Could not connect to Hugging Face. "
+            "Please try again in a few moments."
+        )
+
+    except Exception as error:
 
         return (
             cleaned_text,
@@ -222,13 +242,13 @@ with st.expander("Model Information"):
     )
 
     st.write(
-        f"**Repository:** "
+        f"**Model repository:** "
         f"{HF_USERNAME}/{MODEL_NAME}"
     )
 
 
 # ============================================================
-# USER INPUT
+# INPUT
 # ============================================================
 
 user_text = st.text_area(
@@ -242,7 +262,7 @@ user_text = st.text_area(
 
 
 # ============================================================
-# GENERATE BUTTON
+# GENERATE
 # ============================================================
 
 if st.button(
@@ -266,18 +286,12 @@ if st.button(
                 generate_response(user_text)
             )
 
-        # ----------------------------------------------------
-        # SHOW CLEANED TEXT
-        # ----------------------------------------------------
-
+        # Cleaned text
         st.subheader("Cleaned Text")
 
         st.write(cleaned_text)
 
-        # ----------------------------------------------------
-        # SHOW RESPONSE
-        # ----------------------------------------------------
-
+        # Generated response
         if response:
 
             st.subheader(
@@ -289,8 +303,8 @@ if st.button(
         else:
 
             st.error(
-                "The Hugging Face model could not "
-                "generate a response."
+                "The model could not generate "
+                "a response."
             )
 
             st.code(error)
@@ -306,7 +320,7 @@ with st.expander(
 
     st.write(
         """
-        The application follows this pipeline:
+        Pipeline:
 
         User Text
              ↓
