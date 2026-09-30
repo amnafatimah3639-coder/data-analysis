@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from huggingface_hub import InferenceClient
 
 
 # ============================================================
@@ -16,30 +16,28 @@ st.set_page_config(
 
 
 # ============================================================
-# HUGGING FACE MODEL
+# MODEL
 # ============================================================
 
 MODEL_ID = "AmnaFatimah/t5-small-polite-response"
 
 
 # ============================================================
-# LOAD MODEL
+# HUGGING FACE CLIENT
 # ============================================================
 
 @st.cache_resource
-def load_model():
+def get_client():
 
-    tokenizer = T5Tokenizer.from_pretrained(
-        MODEL_ID
+    token = st.secrets.get(
+        "HF_TOKEN",
+        None
     )
 
-    model = T5ForConditionalGeneration.from_pretrained(
-        MODEL_ID
+    return InferenceClient(
+        provider="hf-inference",
+        api_key=token
     )
-
-    model.eval()
-
-    return tokenizer, model
 
 
 # ============================================================
@@ -48,7 +46,6 @@ def load_model():
 
 def clean_text(text):
 
-    # Lowercase
     text = text.lower()
 
     # Remove URLs
@@ -93,11 +90,7 @@ def clean_text(text):
 # GENERATE RESPONSE
 # ============================================================
 
-def generate_response(
-    text,
-    tokenizer,
-    model
-):
+def generate_response(text):
 
     cleaned_text = clean_text(text)
 
@@ -106,29 +99,29 @@ def generate_response(
         + cleaned_text
     )
 
-    # Tokenize
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        max_length=128,
-        truncation=True
-    )
+    try:
 
-    # Generate
-    output_ids = model.generate(
-        **inputs,
-        max_length=80,
-        num_beams=4,
-        early_stopping=True
-    )
+        client = get_client()
 
-    # Convert generated tokens to text
-    response = tokenizer.decode(
-        output_ids[0],
-        skip_special_tokens=True
-    )
+        result = client.text_generation(
+            prompt,
+            model=MODEL_ID,
+            max_new_tokens=80
+        )
 
-    return cleaned_text, response
+        return (
+            cleaned_text,
+            result,
+            None
+        )
+
+    except Exception as error:
+
+        return (
+            cleaned_text,
+            None,
+            str(error)
+        )
 
 
 # ============================================================
@@ -150,30 +143,19 @@ st.info(
 
 
 # ============================================================
-# LOAD MODEL
+# MODEL INFORMATION
 # ============================================================
 
-try:
+with st.expander("Model Information"):
 
-    with st.spinner(
-        "Loading fine-tuned T5-small model..."
-    ):
-
-        tokenizer, model = load_model()
-
-    st.success(
-        "Fine-tuned model loaded successfully!"
+    st.write(
+        "**Model:** "
+        + MODEL_ID
     )
 
-except Exception as error:
-
-    st.error(
-        "The model could not be loaded."
+    st.write(
+        "The model is hosted on Hugging Face."
     )
-
-    st.code(str(error))
-
-    st.stop()
 
 
 # ============================================================
@@ -190,7 +172,7 @@ user_text = st.text_area(
 
 
 # ============================================================
-# GENERATE BUTTON
+# BUTTON
 # ============================================================
 
 if st.button(
@@ -210,23 +192,37 @@ if st.button(
             "Generating response..."
         ):
 
-            cleaned_text, response = (
-                generate_response(
-                    user_text,
-                    tokenizer,
-                    model
-                )
+            cleaned_text, response, error = (
+                generate_response(user_text)
             )
+
+        # ----------------------------------------------------
+        # CLEANED TEXT
+        # ----------------------------------------------------
 
         st.subheader("Cleaned Text")
 
         st.write(cleaned_text)
 
-        st.subheader(
-            "Generated Polite Response"
-        )
+        # ----------------------------------------------------
+        # RESPONSE
+        # ----------------------------------------------------
 
-        st.success(response)
+        if response:
+
+            st.subheader(
+                "Generated Polite Response"
+            )
+
+            st.success(response)
+
+        else:
+
+            st.error(
+                "The model could not generate a response."
+            )
+
+            st.code(error)
 
 
 # ============================================================
@@ -239,7 +235,7 @@ with st.expander(
 
     st.write(
         """
-        The application follows this pipeline:
+        Pipeline:
 
         User Text
              ↓
@@ -247,7 +243,7 @@ with st.expander(
              ↓
         T5 Prompt
              ↓
-        Fine-Tuned T5-small
+        Hugging Face
              ↓
         Polite Response
 
