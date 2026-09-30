@@ -1,13 +1,13 @@
 import streamlit as st
-import torch
 import re
+import torch
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 
 
-# ---------------------------------------------------------
+# ============================================================
 # PAGE CONFIGURATION
-# ---------------------------------------------------------
+# ============================================================
 
 st.set_page_config(
     page_title="Polite Response Generator",
@@ -16,35 +16,42 @@ st.set_page_config(
 )
 
 
-# ---------------------------------------------------------
-# MODEL CONFIGURATION
-# ---------------------------------------------------------
+# ============================================================
+# MODEL
+# ============================================================
 
-MODEL_NAME = "amna fatimah/t5-small-polite-response"
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_NAME = "Amna Fatimah/t5-small-polite-response"
 
 
-# ---------------------------------------------------------
+# Streamlit Cloud normally runs on CPU.
+device = torch.device("cpu")
+
+
+# ============================================================
 # LOAD MODEL
-# ---------------------------------------------------------
+# ============================================================
 
 @st.cache_resource
 def load_model():
 
-    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = T5Tokenizer.from_pretrained(
+        MODEL_NAME
+    )
 
-    model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME)
+    model = T5ForConditionalGeneration.from_pretrained(
+        MODEL_NAME
+    )
 
     model = model.to(device)
+
     model.eval()
 
     return tokenizer, model
 
 
-# ---------------------------------------------------------
+# ============================================================
 # TEXT CLEANING
-# ---------------------------------------------------------
+# ============================================================
 
 def clean_text(text):
 
@@ -52,35 +59,55 @@ def clean_text(text):
     text = text.lower()
 
     # Remove URLs
-    text = re.sub(r"http\S+|www\S+|https\S+", "", text)
+    text = re.sub(
+        r"http\S+|www\S+|https\S+",
+        "",
+        text
+    )
 
     # Remove mentions
-    text = re.sub(r"@\w+", "", text)
+    text = re.sub(
+        r"@\w+",
+        "",
+        text
+    )
 
     # Remove hashtags
-    text = re.sub(r"#\w+", "", text)
+    text = re.sub(
+        r"#\w+",
+        "",
+        text
+    )
 
     # Remove special characters
-    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
+    text = re.sub(
+        r"[^a-zA-Z0-9\s]",
+        " ",
+        text
+    )
 
     # Normalize spaces
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
-    # Remove extra spaces
-    text = text.strip()
-
-    return text
+    return text.strip()
 
 
-# ---------------------------------------------------------
+# ============================================================
 # GENERATE RESPONSE
-# ---------------------------------------------------------
+# ============================================================
 
 def generate_response(text, tokenizer, model):
 
     cleaned_text = clean_text(text)
 
-    prompt = f"Generate a polite response: {cleaned_text}"
+    prompt = (
+        "Generate a polite response: "
+        + cleaned_text
+    )
 
     inputs = tokenizer(
         prompt,
@@ -89,7 +116,8 @@ def generate_response(text, tokenizer, model):
         truncation=True
     )
 
-    # Move input tensors to the same device as the model
+    # Make sure inputs are on the same device
+    # as the model.
     inputs = {
         key: value.to(model.device)
         for key, value in inputs.items()
@@ -112,62 +140,84 @@ def generate_response(text, tokenizer, model):
     return cleaned_text, response
 
 
-# ---------------------------------------------------------
-# STREAMLIT INTERFACE
-# ---------------------------------------------------------
+# ============================================================
+# APPLICATION TITLE
+# ============================================================
 
 st.title("💬 Polite Response Generator")
 
 st.write(
-    "Enter a message and the fine-tuned T5 model will generate "
-    "a polite response."
+    "Enter a message and the fine-tuned "
+    "T5-small model will generate a polite response."
 )
 
 st.info(
-    "The model was fine-tuned using TweetEval sentiment data."
+    "Negative → Apology | "
+    "Neutral → Clarification | "
+    "Positive → Appreciation"
 )
 
 
-# Load model
+# ============================================================
+# LOAD MODEL
+# ============================================================
+
 try:
 
-    tokenizer, model = load_model()
+    with st.spinner("Loading model..."):
+
+        tokenizer, model = load_model()
 
     st.success("Model loaded successfully!")
 
 except Exception as e:
 
-    st.error("Could not load the model.")
+    st.error("The model could not be loaded.")
+
+    st.write(
+        "Please check that your Hugging Face "
+        "model repository is correct and public."
+    )
 
     st.code(str(e))
 
     st.stop()
 
 
-# ---------------------------------------------------------
+# ============================================================
 # USER INPUT
-# ---------------------------------------------------------
+# ============================================================
 
 user_text = st.text_area(
     "Enter your text:",
-    placeholder="Example: I am really disappointed with this service.",
+    placeholder=(
+        "Example: "
+        "I am really disappointed with this service."
+    ),
     height=150
 )
 
 
-# ---------------------------------------------------------
+# ============================================================
 # GENERATE BUTTON
-# ---------------------------------------------------------
+# ============================================================
 
-if st.button("Generate Polite Response", type="primary"):
+if st.button(
+    "Generate Polite Response",
+    type="primary"
+):
 
     if not user_text.strip():
 
-        st.warning("Please enter some text first.")
+        st.warning(
+            "Please enter some text first."
+        )
 
     else:
 
-        with st.spinner("Generating response..."):
+        with st.spinner(
+            "Generating response..."
+        ):
 
             cleaned_text, response = generate_response(
                 user_text,
@@ -179,32 +229,38 @@ if st.button("Generate Polite Response", type="primary"):
 
         st.write(cleaned_text)
 
-        st.subheader("Generated Polite Response")
+        st.subheader(
+            "Generated Polite Response"
+        )
 
         st.success(response)
 
 
-# ---------------------------------------------------------
+# ============================================================
 # INFORMATION
-# ---------------------------------------------------------
+# ============================================================
 
-with st.expander("How does this application work?"):
+with st.expander(
+    "How does this application work?"
+):
 
     st.write(
         """
-        **Pipeline:**
+        The application follows this pipeline:
 
-        1. User enters text
-        2. Text is cleaned
-        3. A prompt is created
-        4. The fine-tuned T5-small model processes the prompt
-        5. A polite response is generated
+        1. User enters text.
+        2. URLs, mentions, hashtags and
+           special characters are removed.
+        3. The cleaned text is converted
+           into a T5 prompt.
+        4. The fine-tuned T5-small model
+           processes the prompt.
+        5. A polite response is generated.
 
-        The original training pipeline used TweetEval sentiment
-        labels to create response styles:
+        Response styles:
 
-        • Negative → Apology  
-        • Neutral → Clarification  
+        • Negative → Apology
+        • Neutral → Clarification
         • Positive → Appreciation
         """
     )
