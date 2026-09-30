@@ -1,8 +1,10 @@
 import streamlit as st
 import re
-import torch
 
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import (
+    T5Tokenizer,
+    T5ForConditionalGeneration
+)
 
 
 # ============================================================
@@ -17,14 +19,13 @@ st.set_page_config(
 
 
 # ============================================================
-# MODEL
+# HUGGING FACE MODEL
 # ============================================================
 
-MODEL_NAME = "Amna Fatimah/t5-small-polite-response"
+# IMPORTANT:
+# Replace this with YOUR actual Hugging Face model repository.
 
-
-# Streamlit Cloud normally runs on CPU.
-device = torch.device("cpu")
+MODEL_NAME = "YOUR_USERNAME/t5-small-polite-response"
 
 
 # ============================================================
@@ -42,15 +43,13 @@ def load_model():
         MODEL_NAME
     )
 
-    model = model.to(device)
-
     model.eval()
 
     return tokenizer, model
 
 
 # ============================================================
-# TEXT CLEANING
+# CLEAN TEXT
 # ============================================================
 
 def clean_text(text):
@@ -60,7 +59,7 @@ def clean_text(text):
 
     # Remove URLs
     text = re.sub(
-        r"http\S+|www\S+|https\S+",
+        r"https?://\S+|www\.\S+",
         "",
         text
     )
@@ -100,7 +99,11 @@ def clean_text(text):
 # GENERATE RESPONSE
 # ============================================================
 
-def generate_response(text, tokenizer, model):
+def generate_response(
+    text,
+    tokenizer,
+    model
+):
 
     cleaned_text = clean_text(text)
 
@@ -109,6 +112,7 @@ def generate_response(text, tokenizer, model):
         + cleaned_text
     )
 
+    # Tokenize input
     inputs = tokenizer(
         prompt,
         return_tensors="pt",
@@ -116,22 +120,15 @@ def generate_response(text, tokenizer, model):
         truncation=True
     )
 
-    # Make sure inputs are on the same device
-    # as the model.
-    inputs = {
-        key: value.to(model.device)
-        for key, value in inputs.items()
-    }
+    # Generate response
+    output_ids = model.generate(
+        **inputs,
+        max_length=80,
+        num_beams=4,
+        early_stopping=True
+    )
 
-    with torch.no_grad():
-
-        output_ids = model.generate(
-            **inputs,
-            max_length=80,
-            num_beams=4,
-            early_stopping=True
-        )
-
+    # Convert tokens back into text
     response = tokenizer.decode(
         output_ids[0],
         skip_special_tokens=True
@@ -141,7 +138,7 @@ def generate_response(text, tokenizer, model):
 
 
 # ============================================================
-# APPLICATION TITLE
+# TITLE
 # ============================================================
 
 st.title("💬 Polite Response Generator")
@@ -164,7 +161,7 @@ st.info(
 
 try:
 
-    with st.spinner("Loading model..."):
+    with st.spinner("Loading T5-small model..."):
 
         tokenizer, model = load_model()
 
@@ -172,11 +169,11 @@ try:
 
 except Exception as e:
 
-    st.error("The model could not be loaded.")
+    st.error("Unable to load the model.")
 
     st.write(
-        "Please check that your Hugging Face "
-        "model repository is correct and public."
+        "Check that your Hugging Face model "
+        "repository name is correct and public."
     )
 
     st.code(str(e))
@@ -185,21 +182,21 @@ except Exception as e:
 
 
 # ============================================================
-# USER INPUT
+# INPUT
 # ============================================================
 
 user_text = st.text_area(
     "Enter your text:",
     placeholder=(
-        "Example: "
-        "I am really disappointed with this service."
+        "Example: I am really disappointed "
+        "with this service."
     ),
     height=150
 )
 
 
 # ============================================================
-# GENERATE BUTTON
+# BUTTON
 # ============================================================
 
 if st.button(
@@ -219,10 +216,12 @@ if st.button(
             "Generating response..."
         ):
 
-            cleaned_text, response = generate_response(
-                user_text,
-                tokenizer,
-                model
+            cleaned_text, response = (
+                generate_response(
+                    user_text,
+                    tokenizer,
+                    model
+                )
             )
 
         st.subheader("Cleaned Text")
@@ -246,21 +245,22 @@ with st.expander(
 
     st.write(
         """
-        The application follows this pipeline:
+        Pipeline:
 
         1. User enters text.
-        2. URLs, mentions, hashtags and
-           special characters are removed.
-        3. The cleaned text is converted
-           into a T5 prompt.
-        4. The fine-tuned T5-small model
-           processes the prompt.
-        5. A polite response is generated.
+        2. URLs are removed.
+        3. Mentions are removed.
+        4. Hashtags are removed.
+        5. Special characters are removed.
+        6. Text is normalized.
+        7. A T5 prompt is created.
+        8. The fine-tuned T5-small model
+           generates a polite response.
 
         Response styles:
 
-        • Negative → Apology
-        • Neutral → Clarification
-        • Positive → Appreciation
+        Negative → Apology
+        Neutral → Clarification
+        Positive → Appreciation
         """
     )
