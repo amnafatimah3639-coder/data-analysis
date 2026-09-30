@@ -1,17 +1,11 @@
 import streamlit as st
 import re
-import os
+import torch
 
-# ============================================================
-# Check and import Transformers
-# ============================================================
-
-try:
-    from transformers import T5Tokenizer, T5ForConditionalGeneration
-except Exception as e:
-    st.error("The Hugging Face Transformers library could not be loaded.")
-    st.code(str(e))
-    st.stop()
+from transformers import (
+    T5Tokenizer,
+    T5ForConditionalGeneration
+)
 
 
 # ============================================================
@@ -26,7 +20,7 @@ st.set_page_config(
 
 
 # ============================================================
-# MODEL NAME
+# HUGGING FACE MODEL
 # ============================================================
 
 # CHANGE THIS TO YOUR ACTUAL HUGGING FACE MODEL
@@ -48,6 +42,8 @@ def load_model():
         MODEL_NAME
     )
 
+    model = model.to("cpu")
+
     model.eval()
 
     return tokenizer, model
@@ -59,7 +55,6 @@ def load_model():
 
 def clean_text(text):
 
-    # Lowercase
     text = text.lower()
 
     # Remove URLs
@@ -110,11 +105,11 @@ def generate_response(
     model
 ):
 
-    cleaned = clean_text(text)
+    cleaned_text = clean_text(text)
 
     prompt = (
         "Generate a polite response: "
-        + cleaned
+        + cleaned_text
     )
 
     inputs = tokenizer(
@@ -124,9 +119,14 @@ def generate_response(
         truncation=True
     )
 
+    inputs = {
+        key: value.to("cpu")
+        for key, value in inputs.items()
+    }
+
     with torch.no_grad():
 
-        output = model.generate(
+        output_ids = model.generate(
             **inputs,
             max_length=80,
             num_beams=4,
@@ -134,11 +134,11 @@ def generate_response(
         )
 
     response = tokenizer.decode(
-        output[0],
+        output_ids[0],
         skip_special_tokens=True
     )
 
-    return cleaned, response
+    return cleaned_text, response
 
 
 # ============================================================
@@ -148,8 +148,8 @@ def generate_response(
 st.title("💬 Polite Response Generator")
 
 st.write(
-    "Enter a message and the fine-tuned T5-small "
-    "model will generate a polite response."
+    "Enter a message and the fine-tuned "
+    "T5-small model will generate a polite response."
 )
 
 st.info(
@@ -169,19 +169,22 @@ try:
 
         tokenizer, model = load_model()
 
-    st.success("Model loaded successfully!")
+except Exception as error:
 
-except Exception as e:
+    st.error("Unable to load the Hugging Face model.")
 
-    st.error("The model could not be loaded.")
+    st.write(
+        "Please check your Hugging Face model name "
+        "and make sure the repository is public."
+    )
 
-    st.code(str(e))
+    st.code(str(error))
 
     st.stop()
 
 
 # ============================================================
-# USER INPUT
+# TEXT INPUT
 # ============================================================
 
 user_text = st.text_area(
@@ -195,7 +198,7 @@ user_text = st.text_area(
 
 
 # ============================================================
-# GENERATE
+# GENERATE BUTTON
 # ============================================================
 
 if st.button(
@@ -224,6 +227,7 @@ if st.button(
             )
 
         st.subheader("Cleaned Text")
+
         st.write(cleaned_text)
 
         st.subheader(
@@ -243,7 +247,7 @@ with st.expander(
 
     st.write(
         """
-        The application follows this pipeline:
+        Pipeline:
 
         User Text
              ↓
