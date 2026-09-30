@@ -1,15 +1,10 @@
 import streamlit as st
+import requests
 import re
-import torch
-
-from transformers import (
-    T5Tokenizer,
-    T5ForConditionalGeneration
-)
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -23,30 +18,13 @@ st.set_page_config(
 # HUGGING FACE MODEL
 # ============================================================
 
-# CHANGE THIS TO YOUR ACTUAL HUGGING FACE MODEL
-MODEL_NAME = "Amna Fatimah/t5-small-polite-response"
+HF_USERNAME = "AmnaFatimah"
+MODEL_NAME = "t5-small-polite-response"
 
-
-# ============================================================
-# LOAD MODEL
-# ============================================================
-
-@st.cache_resource
-def load_model():
-
-    tokenizer = T5Tokenizer.from_pretrained(
-        MODEL_NAME
-    )
-
-    model = T5ForConditionalGeneration.from_pretrained(
-        MODEL_NAME
-    )
-
-    model = model.to("cpu")
-
-    model.eval()
-
-    return tokenizer, model
+API_URL = (
+    f"https://api-inference.huggingface.co/models/"
+    f"{HF_USERNAME}/{MODEL_NAME}"
+)
 
 
 # ============================================================
@@ -55,6 +33,7 @@ def load_model():
 
 def clean_text(text):
 
+    # Convert to lowercase
     text = text.lower()
 
     # Remove URLs
@@ -96,14 +75,23 @@ def clean_text(text):
 
 
 # ============================================================
+# GET HUGGING FACE TOKEN
+# ============================================================
+
+def get_huggingface_token():
+
+    try:
+        return st.secrets["HF_TOKEN"]
+
+    except Exception:
+        return None
+
+
+# ============================================================
 # GENERATE RESPONSE
 # ============================================================
 
-def generate_response(
-    text,
-    tokenizer,
-    model
-):
+def generate_response(text):
 
     cleaned_text = clean_text(text)
 
@@ -112,33 +100,93 @@ def generate_response(
         + cleaned_text
     )
 
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        max_length=128,
-        truncation=True
-    )
+    token = get_huggingface_token()
 
-    inputs = {
-        key: value.to("cpu")
-        for key, value in inputs.items()
+    headers = {
+        "Content-Type": "application/json"
     }
 
-    with torch.no_grad():
+    # Add authentication only if a token exists
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
-        output_ids = model.generate(
-            **inputs,
-            max_length=80,
-            num_beams=4,
-            early_stopping=True
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 80,
+            "num_beams": 4
+        }
+    }
+
+    try:
+
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json=payload,
+            timeout=120
         )
 
-    response = tokenizer.decode(
-        output_ids[0],
-        skip_special_tokens=True
-    )
+        # Check HTTP status
+        if response.status_code != 200:
 
-    return cleaned_text, response
+            try:
+                error_data = response.json()
+            except Exception:
+                error_data = response.text
+
+            return cleaned_text, None, str(error_data)
+
+        result = response.json()
+
+        # Hugging Face text-generation response
+        if isinstance(result, list):
+
+            if len(result) > 0:
+
+                generated = result[0].get(
+                    "generated_text",
+                    ""
+                )
+
+                # Remove the original prompt if returned
+                if generated.startswith(prompt):
+                    generated = generated[len(prompt):].strip()
+
+                return cleaned_text, generated, None
+
+        # Error returned by Hugging Face
+        if isinstance(result, dict):
+
+            if "error" in result:
+
+                return (
+                    cleaned_text,
+                    None,
+                    result["error"]
+                )
+
+        return (
+            cleaned_text,
+            None,
+            "Unexpected response from Hugging Face."
+        )
+
+    except requests.exceptions.Timeout:
+
+        return (
+            cleaned_text,
+            None,
+            "The Hugging Face request timed out. Please try again."
+        )
+
+    except requests.exceptions.RequestException as error:
+
+        return (
+            cleaned_text,
+            None,
+            str(error)
+        )
 
 
 # ============================================================
@@ -148,8 +196,8 @@ def generate_response(
 st.title("💬 Polite Response Generator")
 
 st.write(
-    "Enter a message and the fine-tuned "
-    "T5-small model will generate a polite response."
+    "Enter a message and the fine-tuned T5-small "
+    "model will generate a polite response."
 )
 
 st.info(
@@ -160,31 +208,27 @@ st.info(
 
 
 # ============================================================
-# LOAD MODEL
+# MODEL INFORMATION
 # ============================================================
 
-try:
-
-    with st.spinner("Loading model..."):
-
-        tokenizer, model = load_model()
-
-except Exception as error:
-
-    st.error("Unable to load the Hugging Face model.")
+with st.expander("Model Information"):
 
     st.write(
-        "Please check your Hugging Face model name "
-        "and make sure the repository is public."
+        f"**Hugging Face user:** {HF_USERNAME}"
     )
 
-    st.code(str(error))
+    st.write(
+        f"**Model:** {MODEL_NAME}"
+    )
 
-    st.stop()
+    st.write(
+        f"**Repository:** "
+        f"{HF_USERNAME}/{MODEL_NAME}"
+    )
 
 
 # ============================================================
-# TEXT INPUT
+# USER INPUT
 # ============================================================
 
 user_text = st.text_area(
@@ -218,27 +262,42 @@ if st.button(
             "Generating response..."
         ):
 
-            cleaned_text, response = (
-                generate_response(
-                    user_text,
-                    tokenizer,
-                    model
-                )
+            cleaned_text, response, error = (
+                generate_response(user_text)
             )
+
+        # ----------------------------------------------------
+        # SHOW CLEANED TEXT
+        # ----------------------------------------------------
 
         st.subheader("Cleaned Text")
 
         st.write(cleaned_text)
 
-        st.subheader(
-            "Generated Polite Response"
-        )
+        # ----------------------------------------------------
+        # SHOW RESPONSE
+        # ----------------------------------------------------
 
-        st.success(response)
+        if response:
+
+            st.subheader(
+                "Generated Polite Response"
+            )
+
+            st.success(response)
+
+        else:
+
+            st.error(
+                "The Hugging Face model could not "
+                "generate a response."
+            )
+
+            st.code(error)
 
 
 # ============================================================
-# INFORMATION
+# HOW IT WORKS
 # ============================================================
 
 with st.expander(
@@ -247,7 +306,7 @@ with st.expander(
 
     st.write(
         """
-        Pipeline:
+        The application follows this pipeline:
 
         User Text
              ↓
@@ -255,14 +314,22 @@ with st.expander(
              ↓
         T5 Prompt
              ↓
-        Fine-Tuned T5-small
+        Hugging Face Model
              ↓
         Polite Response
 
+        Text cleaning removes:
+
+        • URLs
+        • Mentions
+        • Hashtags
+        • Special characters
+        • Extra spaces
+
         Response styles:
 
-        Negative → Apology
-        Neutral → Clarification
-        Positive → Appreciation
+        • Negative → Apology
+        • Neutral → Clarification
+        • Positive → Appreciation
         """
     )
