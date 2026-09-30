@@ -1,2 +1,6 @@
-streamlit
-requests
+streamlit==1.50.0
+transformers==4.57.1
+torch==2.8.0
+sentencepiece==0.2.1
+safetensors==0.6.2
+huggingface_hub==0.36.0
