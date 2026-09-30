@@ -20,7 +20,7 @@ st.set_page_config(
 # MODEL CONFIGURATION
 # ---------------------------------------------------------
 
-MODEL_NAME = "your-huggingface-username/t5-small-polite-response"
+MODEL_NAME = "amna fatimah/t5-small-polite-response"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
