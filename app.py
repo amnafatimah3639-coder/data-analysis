@@ -1,6 +1,7 @@
 import streamlit as st
-import requests
 import re
+
+from transformers import T5Tokenizer, T5ForConditionalGeneration
 
 
 # ============================================================
@@ -15,17 +16,30 @@ st.set_page_config(
 
 
 # ============================================================
-# HUGGING FACE SETTINGS
+# HUGGING FACE MODEL
 # ============================================================
 
-HF_USERNAME = "AmnaFatimah"
-MODEL_NAME = "t5-small-polite-response"
+MODEL_ID = "AmnaFatimah/t5-small-polite-response"
 
-# Current Hugging Face router endpoint
-API_URL = (
-    f"https://router.huggingface.co/hf-inference/"
-    f"models/{HF_USERNAME}/{MODEL_NAME}"
-)
+
+# ============================================================
+# LOAD MODEL
+# ============================================================
+
+@st.cache_resource
+def load_model():
+
+    tokenizer = T5Tokenizer.from_pretrained(
+        MODEL_ID
+    )
+
+    model = T5ForConditionalGeneration.from_pretrained(
+        MODEL_ID
+    )
+
+    model.eval()
+
+    return tokenizer, model
 
 
 # ============================================================
@@ -76,23 +90,14 @@ def clean_text(text):
 
 
 # ============================================================
-# HUGGING FACE TOKEN
-# ============================================================
-
-def get_token():
-
-    try:
-        return st.secrets["HF_TOKEN"]
-
-    except Exception:
-        return None
-
-
-# ============================================================
 # GENERATE RESPONSE
 # ============================================================
 
-def generate_response(text):
+def generate_response(
+    text,
+    tokenizer,
+    model
+):
 
     cleaned_text = clean_text(text)
 
@@ -101,112 +106,29 @@ def generate_response(text):
         + cleaned_text
     )
 
-    token = get_token()
+    # Tokenize
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        max_length=128,
+        truncation=True
+    )
 
-    headers = {
-        "Content-Type": "application/json"
-    }
+    # Generate
+    output_ids = model.generate(
+        **inputs,
+        max_length=80,
+        num_beams=4,
+        early_stopping=True
+    )
 
-    # Add Hugging Face authentication if available
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    # Convert generated tokens to text
+    response = tokenizer.decode(
+        output_ids[0],
+        skip_special_tokens=True
+    )
 
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 80,
-            "num_beams": 4
-        }
-    }
-
-    try:
-
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            json=payload,
-            timeout=120
-        )
-
-        # ----------------------------------------------------
-        # SUCCESS
-        # ----------------------------------------------------
-
-        if response.status_code == 200:
-
-            result = response.json()
-
-            if isinstance(result, list):
-
-                if len(result) > 0:
-
-                    generated_text = result[0].get(
-                        "generated_text",
-                        ""
-                    )
-
-                    # Remove prompt if the API returns it
-                    if generated_text.startswith(prompt):
-
-                        generated_text = (
-                            generated_text[
-                                len(prompt):
-                            ].strip()
-                        )
-
-                    return (
-                        cleaned_text,
-                        generated_text,
-                        None
-                    )
-
-            return (
-                cleaned_text,
-                None,
-                "Unexpected response from Hugging Face."
-            )
-
-        # ----------------------------------------------------
-        # ERROR
-        # ----------------------------------------------------
-
-        try:
-            error_data = response.json()
-
-        except Exception:
-            error_data = response.text
-
-        return (
-            cleaned_text,
-            None,
-            f"Hugging Face API error "
-            f"({response.status_code}): {error_data}"
-        )
-
-    except requests.exceptions.Timeout:
-
-        return (
-            cleaned_text,
-            None,
-            "The Hugging Face request timed out."
-        )
-
-    except requests.exceptions.ConnectionError:
-
-        return (
-            cleaned_text,
-            None,
-            "Could not connect to Hugging Face. "
-            "Please try again in a few moments."
-        )
-
-    except Exception as error:
-
-        return (
-            cleaned_text,
-            None,
-            str(error)
-        )
+    return cleaned_text, response
 
 
 # ============================================================
@@ -228,23 +150,30 @@ st.info(
 
 
 # ============================================================
-# MODEL INFORMATION
+# LOAD MODEL
 # ============================================================
 
-with st.expander("Model Information"):
+try:
 
-    st.write(
-        f"**Hugging Face user:** {HF_USERNAME}"
+    with st.spinner(
+        "Loading fine-tuned T5-small model..."
+    ):
+
+        tokenizer, model = load_model()
+
+    st.success(
+        "Fine-tuned model loaded successfully!"
     )
 
-    st.write(
-        f"**Model:** {MODEL_NAME}"
+except Exception as error:
+
+    st.error(
+        "The model could not be loaded."
     )
 
-    st.write(
-        f"**Model repository:** "
-        f"{HF_USERNAME}/{MODEL_NAME}"
-    )
+    st.code(str(error))
+
+    st.stop()
 
 
 # ============================================================
@@ -254,15 +183,14 @@ with st.expander("Model Information"):
 user_text = st.text_area(
     "Enter your text:",
     placeholder=(
-        "Example: I am really disappointed "
-        "with this service."
+        "Example: I do not like your service."
     ),
     height=150
 )
 
 
 # ============================================================
-# GENERATE
+# GENERATE BUTTON
 # ============================================================
 
 if st.button(
@@ -282,36 +210,27 @@ if st.button(
             "Generating response..."
         ):
 
-            cleaned_text, response, error = (
-                generate_response(user_text)
+            cleaned_text, response = (
+                generate_response(
+                    user_text,
+                    tokenizer,
+                    model
+                )
             )
 
-        # Cleaned text
         st.subheader("Cleaned Text")
 
         st.write(cleaned_text)
 
-        # Generated response
-        if response:
+        st.subheader(
+            "Generated Polite Response"
+        )
 
-            st.subheader(
-                "Generated Polite Response"
-            )
-
-            st.success(response)
-
-        else:
-
-            st.error(
-                "The model could not generate "
-                "a response."
-            )
-
-            st.code(error)
+        st.success(response)
 
 
 # ============================================================
-# HOW IT WORKS
+# INFORMATION
 # ============================================================
 
 with st.expander(
@@ -320,7 +239,7 @@ with st.expander(
 
     st.write(
         """
-        Pipeline:
+        The application follows this pipeline:
 
         User Text
              ↓
@@ -328,11 +247,11 @@ with st.expander(
              ↓
         T5 Prompt
              ↓
-        Hugging Face Model
+        Fine-Tuned T5-small
              ↓
         Polite Response
 
-        Text cleaning removes:
+        Cleaning removes:
 
         • URLs
         • Mentions
