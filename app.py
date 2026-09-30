@@ -1,11 +1,12 @@
 import streamlit as st
+import urllib.request
+import urllib.error
+import json
 import re
-
-from huggingface_hub import InferenceClient
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -16,28 +17,17 @@ st.set_page_config(
 
 
 # ============================================================
-# MODEL
+# HUGGING FACE SETTINGS
 # ============================================================
 
-MODEL_ID = "AmnaFatimah/t5-small-polite-response"
+HF_USERNAME = "AmnaFatimah"
+MODEL_NAME = "t5-small-polite-response"
 
-
-# ============================================================
-# HUGGING FACE CLIENT
-# ============================================================
-
-@st.cache_resource
-def get_client():
-
-    token = st.secrets.get(
-        "HF_TOKEN",
-        None
-    )
-
-    return InferenceClient(
-        provider="hf-inference",
-        api_key=token
-    )
+API_URL = (
+    "https://router.huggingface.co/"
+    "hf-inference/models/"
+    f"{HF_USERNAME}/{MODEL_NAME}"
+)
 
 
 # ============================================================
@@ -87,6 +77,19 @@ def clean_text(text):
 
 
 # ============================================================
+# GET HUGGING FACE TOKEN
+# ============================================================
+
+def get_hf_token():
+
+    try:
+        return st.secrets["HF_TOKEN"]
+
+    except Exception:
+        return None
+
+
+# ============================================================
 # GENERATE RESPONSE
 # ============================================================
 
@@ -99,20 +102,117 @@ def generate_response(text):
         + cleaned_text
     )
 
+    token = get_hf_token()
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 80
+        }
+    }
+
+    data = json.dumps(payload).encode("utf-8")
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    if token:
+
+        headers["Authorization"] = (
+            "Bearer " + token
+        )
+
+    request = urllib.request.Request(
+        API_URL,
+        data=data,
+        headers=headers,
+        method="POST"
+    )
+
     try:
 
-        client = get_client()
+        with urllib.request.urlopen(
+            request,
+            timeout=120
+        ) as response:
 
-        result = client.text_generation(
-            prompt,
-            model=MODEL_ID,
-            max_new_tokens=80
-        )
+            response_data = response.read().decode(
+                "utf-8"
+            )
+
+            result = json.loads(
+                response_data
+            )
+
+        # Hugging Face returns a list
+        if isinstance(result, list):
+
+            if len(result) > 0:
+
+                generated_text = result[0].get(
+                    "generated_text",
+                    ""
+                )
+
+                # Remove prompt if returned
+                if generated_text.startswith(prompt):
+
+                    generated_text = (
+                        generated_text[
+                            len(prompt):
+                        ].strip()
+                    )
+
+                return (
+                    cleaned_text,
+                    generated_text,
+                    None
+                )
+
+        # Hugging Face error response
+        if isinstance(result, dict):
+
+            if "error" in result:
+
+                return (
+                    cleaned_text,
+                    None,
+                    result["error"]
+                )
 
         return (
             cleaned_text,
-            result,
-            None
+            None,
+            "Unexpected Hugging Face response."
+        )
+
+    except urllib.error.HTTPError as error:
+
+        try:
+
+            error_body = error.read().decode(
+                "utf-8"
+            )
+
+        except Exception:
+
+            error_body = str(error)
+
+        return (
+            cleaned_text,
+            None,
+            f"Hugging Face HTTP {error.code}: "
+            f"{error_body}"
+        )
+
+    except urllib.error.URLError as error:
+
+        return (
+            cleaned_text,
+            None,
+            "Could not connect to Hugging Face: "
+            + str(error.reason)
         )
 
     except Exception as error:
@@ -131,8 +231,8 @@ def generate_response(text):
 st.title("💬 Polite Response Generator")
 
 st.write(
-    "Enter a message and the fine-tuned T5-small "
-    "model will generate a polite response."
+    "Enter a message and the fine-tuned "
+    "T5-small model will generate a polite response."
 )
 
 st.info(
@@ -149,17 +249,22 @@ st.info(
 with st.expander("Model Information"):
 
     st.write(
-        "**Model:** "
-        + MODEL_ID
+        f"**Hugging Face account:** "
+        f"{HF_USERNAME}"
     )
 
     st.write(
-        "The model is hosted on Hugging Face."
+        f"**Model:** {MODEL_NAME}"
+    )
+
+    st.write(
+        "The application uses the Hugging Face "
+        "Inference API."
     )
 
 
 # ============================================================
-# INPUT
+# USER INPUT
 # ============================================================
 
 user_text = st.text_area(
@@ -172,7 +277,7 @@ user_text = st.text_area(
 
 
 # ============================================================
-# BUTTON
+# GENERATE BUTTON
 # ============================================================
 
 if st.button(
@@ -205,7 +310,7 @@ if st.button(
         st.write(cleaned_text)
 
         # ----------------------------------------------------
-        # RESPONSE
+        # GENERATED RESPONSE
         # ----------------------------------------------------
 
         if response:
@@ -219,7 +324,8 @@ if st.button(
         else:
 
             st.error(
-                "The model could not generate a response."
+                "The model could not generate "
+                "a response."
             )
 
             st.code(error)
@@ -243,7 +349,7 @@ with st.expander(
              ↓
         T5 Prompt
              ↓
-        Hugging Face
+        Hugging Face Model
              ↓
         Polite Response
 
